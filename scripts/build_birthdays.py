@@ -4,7 +4,7 @@
 Pulls everyone in the PCO list "SM – Students & Leaders" and marks anyone also
 in "SM – Student Roster" as a student; everyone else is a leader.
 
-Privacy: students appear as first name + last initial, leaders by full name.
+Students appear by first and last name; leaders by full name plus "(Leader)".
 No birth years, ages, grades, or contact info are published.
 
 Needs two environment variables (a PCO Personal Access Token):
@@ -85,10 +85,8 @@ def main(out_path):
         _, m, d = map(int, bd.split("-"))
         first = (a.get("nickname") or a.get("first_name") or "").strip()
         last = (a.get("last_name") or "").strip()
-        if p["id"] in roster_ids:
-            title = f"🎂 {first} {last[:1]}." if last else f"🎂 {first}"
-        else:
-            title = f"🎂 {first} {last} (Leader)".replace("  ", " ")
+        name = f"{first} {last}".strip()
+        title = f"🎂 {name}" if p["id"] in roster_ids else f"🎂 {name} (Leader)"
         start = datetime.date(2024, m, d)  # 2024 is a leap year, so Feb 29 is valid
         end = start + datetime.timedelta(days=1)
         rrule = "RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1" if (m, d) == (2, 29) else "RRULE:FREQ=YEARLY"
