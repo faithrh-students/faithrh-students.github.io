@@ -4,8 +4,10 @@
 Pulls everyone in the PCO list "SM – Students & Leaders" and marks anyone also
 in "SM – Student Roster" as a student; everyone else is a leader.
 
-Students appear by first and last name; leaders by full name plus "(Leader)".
-No birth years, ages, grades, or contact info are published.
+Each birthday shows the person's first and last name. The event notes say
+"Leader" or the student's current grade, plus the age they turn on their next
+birthday. The feed is rebuilt daily, so grades and ages stay current.
+No contact info is published.
 
 Needs two environment variables (a PCO Personal Access Token):
   PCO_APP_ID, PCO_SECRET
@@ -53,6 +55,11 @@ def list_people(list_id):
     return out
 
 
+def ordinal(n):
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def esc(text):
     return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
 
@@ -75,6 +82,7 @@ def main(out_path):
         "X-WR-CALNAME:Faith Students Birthdays", "X-WR-TIMEZONE:America/Detroit",
         "REFRESH-INTERVAL;VALUE=DURATION:PT12H", "X-PUBLISHED-TTL:PT12H",
     ]
+    today = datetime.datetime.now(datetime.timezone.utc).date()
     count = skipped = 0
     for p in everyone:
         a = p["attributes"]
@@ -82,18 +90,27 @@ def main(out_path):
         if not bd:
             skipped += 1
             continue
-        _, m, d = map(int, bd.split("-"))
+        y, m, d = map(int, bd.split("-"))
         first = (a.get("nickname") or a.get("first_name") or "").strip()
         last = (a.get("last_name") or "").strip()
-        name = f"{first} {last}".strip()
-        title = f"🎂 {name}" if p["id"] in roster_ids else f"🎂 {name} (Leader)"
+        title = "🎂 " + f"{first} {last}".strip()
+        if p["id"] not in roster_ids:
+            note = "Leader"
+        elif isinstance(a.get("grade"), int) and a["grade"] > 0:
+            note = f"{ordinal(a['grade'])} grade"
+        else:
+            note = "Student"
+        bday = datetime.date(today.year, m, min(d, 28) if (m, d) == (2, 29) else d)
+        turning = today.year - y + (0 if bday >= today else 1)
+        if 5 <= turning <= 110:  # skip obviously wrong birth years
+            note += f" \u00b7 Turning {turning}"
         start = datetime.date(2024, m, d)  # 2024 is a leap year, so Feb 29 is valid
         end = start + datetime.timedelta(days=1)
         rrule = "RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1" if (m, d) == (2, 29) else "RRULE:FREQ=YEARLY"
         lines += [
             "BEGIN:VEVENT", f"UID:bday-{p['id']}@faithrh.com", f"DTSTAMP:{stamp}",
             f"DTSTART;VALUE=DATE:{start:%Y%m%d}", f"DTEND;VALUE=DATE:{end:%Y%m%d}", rrule,
-            f"SUMMARY:{esc(title)}", "TRANSP:TRANSPARENT", "END:VEVENT",
+            f"SUMMARY:{esc(title)}", f"DESCRIPTION:{esc(note)}", "TRANSP:TRANSPARENT", "END:VEVENT",
         ]
         count += 1
     lines.append("END:VCALENDAR")
