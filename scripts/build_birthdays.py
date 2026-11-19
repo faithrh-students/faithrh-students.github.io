@@ -6,8 +6,8 @@ in "SM – Student Roster" as a student; everyone else is a leader.
 
 Each birthday shows the person's first and last name. The event notes say
 "Leader" or the student's current grade, plus the age they turn on their next
-birthday. The feed is rebuilt daily, so grades and ages stay current.
-No contact info is published.
+birthday, and their phone number from PCO if they have one. The feed is rebuilt
+daily, so grades, ages and numbers stay current.
 
 Needs two environment variables (a PCO Personal Access Token):
   PCO_APP_ID, PCO_SECRET
@@ -45,14 +45,30 @@ def refresh(list_id):
         print(f"warning: could not refresh list {list_id}: {e}")
 
 
-def list_people(list_id):
+def list_people(list_id, with_phones=False):
     url = f"{API}/lists/{list_id}/people?per_page=100"
-    out = []
+    if with_phones:
+        url += "&include=phone_numbers"
+    out, phones = [], {}
     while url:
         page = call(url)
         out.extend(page.get("data", []))
+        for inc in page.get("included", []):
+            if inc.get("type") == "PhoneNumber":
+                phones[inc["id"]] = inc.get("attributes", {})
         url = page.get("links", {}).get("next")
-    return out
+    return (out, phones) if with_phones else out
+
+
+def best_phone(person, phones):
+    """Primary number first, then a mobile, then whatever is on file."""
+    refs = person.get("relationships", {}).get("phone_numbers", {}).get("data") or []
+    nums = [phones[r["id"]] for r in refs if r.get("id") in phones]
+    if not nums:
+        return ""
+    nums.sort(key=lambda n: (not n.get("primary"), (n.get("location") or "").lower() != "mobile"))
+    n = nums[0]
+    return (n.get("national") or n.get("number") or "").strip()
 
 
 def ordinal(n):
@@ -71,7 +87,7 @@ def main(out_path):
     time.sleep(20)
 
     roster_ids = {p["id"] for p in list_people(STUDENT_ROSTER_LIST)}
-    everyone = list_people(STUDENTS_AND_LEADERS_LIST)
+    everyone, phones = list_people(STUDENTS_AND_LEADERS_LIST, with_phones=True)
     if not everyone:
         sys.exit("List came back empty; refusing to publish an empty calendar.")
 
@@ -104,6 +120,9 @@ def main(out_path):
         turning = today.year - y + (0 if bday >= today else 1)
         if 5 <= turning <= 110:  # skip obviously wrong birth years
             note += f" \u00b7 Turning {turning}"
+        phone = best_phone(p, phones)
+        if phone:
+            note += f" \u00b7 {phone}"
         start = datetime.date(2024, m, d)  # 2024 is a leap year, so Feb 29 is valid
         end = start + datetime.timedelta(days=1)
         rrule = "RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1" if (m, d) == (2, 29) else "RRULE:FREQ=YEARLY"
